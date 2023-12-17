@@ -4,6 +4,13 @@ from utils.Plotter import Plotter
 from tqdm import tqdm
 
 
+def Trajectory(t):
+    X = 0
+    dX = 0
+    ddX = 0
+    return X, dX, ddX
+
+
 class InvPendulum:
     """
     A class to represent Rotary Inverted Pendulum Dynamical System
@@ -36,6 +43,7 @@ class InvPendulum:
                           'Br': 0,
                           'Lr': 0.216,
                           'Mr': 0.257,
+                          'Vmax': 6
                           }
 
         if config is None:
@@ -52,16 +60,98 @@ class InvPendulum:
         self.Jp = self.Mp * self.Lp**2 / 3
         self.Jr = self.Mr * self.Lr**2 / 3
 
-    def ODEFunction(self, t, State):
-        """Defines the ODE to be solved."""
+    def Saturation(self, X):
+        return X if np.abs(X) > 1 else np.sign(X)
+
+    def SlidingMode(self, t, State, Traj=Trajectory):
+        # Desired X and Derivatives of it
+        Alphad, dAlphad, ddAlphad = Traj(t)
+        Thetad, dThetad, ddThetad = 0, 0, 0
+
+        # Disturbance
+        OmegaTheta = 0
+        OmegaAlpha = 0
+
+        # Unpack the in Coming State
+        Theta, dTheta, Alpha, dAlpha = State
+
+        # Error Dynamics
+        # Alpha
+        AlphaErr = Alphad - Alpha
+        dAlphaErr = dAlphad - dAlpha
+        # Theta
+        ThetaErr = Thetad - Theta
+        dThetaErr = dThetad - dTheta
+
+        # Sliding Mode Controller Coefs
+        Lambda1 = 0
+        Eta = 0
+        Lambda2 = 0
+
+        # Sliding Surfaces
+        STheta = dThetaErr + Lambda1 * ThetaErr
+        SAlpha = dAlphaErr + Lambda1 * AlphaErr
+
+        # Dynamical Propeties Calculation
+
+        # Motor Torque Calculation
+        Tau = self.Eta_g * self.Kg * self.Eta_m * self.kt / self.Rm
+        # F Matrix Filling
+        F = np.zeros((2, 2))
+
+        F[0, 0] = self.Mp * self.Lr**2 + 0.25 * self.Mp \
+            * self.Lp**2 * (1 - np.cos(Alpha)**2) \
+            + self.Jr
+        F[0, 1] = -0.5 * self.Mp * self.Lp * self.Lr * np.cos(Alpha)
+        F[1, 0] = -0.5 * self.Mp * self.Lp * self.Lr * np.cos(Alpha)
+        F[1, 1] = self.Jp + 0.25 * self.Mp * self.Lp**2
+
+        # B Matrix Filling
+        G = np.zeros(3)
+        G[0] = Tau - self.Br*dTheta - (0.5 * self.Mp * self.Lp**2 * np.sin(Alpha)
+                                       * np.cos(Alpha)) * dTheta * dAlpha \
+            - (0.5 * self.Mp * self.Lp * self.Lr * np.sin(Alpha)) * dAlpha**2
+
+        G[1] = self.Eta_g * self.Kg * self.Eta_m * self.kt / self.Rm - self.Bp*dAlpha + (0.25*self.Mp * self.Lp**2
+                                                                                         * np.cos(Alpha) * np.sin(Alpha)) * dTheta**2 \
+            + (0.5*self.Mp * self.Lp * self.g * np.sin(Alpha))
+
+        G[2] = -self.Kg*self.km*dTheta / self.Rm
+
+        # D as the Deteminant of F
+        D = np.linalg.det(F)
+        print(D)
+
+        # Control Signal Calculation
+        dSTheta = -Eta * np.sign(STheta)
+        dSAlpha = -Eta * np.sign(SAlpha)
+
+        U1 = (((-(dSTheta + OmegaTheta + Lambda1 * dTheta)
+              * D + F[0, 1] * G[2]) / F[1, 1]) - G[1]) / G[0]
+        U2 = (((-(dSAlpha + OmegaAlpha - Lambda1 * dAlphaErr - ddAlphad)
+              * D + F[0, 0] * G[2]) / F[1, 0]) - G[1]) / G[0]
+
+        Vm = (U1 * Lambda2 + U2) / (1 + Lambda2)
+        Vm = U2
+        return Vm
+
+    def ForcedSystemODE(self, t, State):
+        self.U = self.SlidingMode(t, State)
+        # self.U = 0
+        return self.SystemODE(t, State, self.U)
+
+    def SystemODE(self, t, State, Vm):
+        """Defines the ODE to be solved.
+            >> Note that Vm is the System Input.
+        """
+
+        # Vm = np.clip(Vm, -self.Vmax, self.Vmax)
 
         Theta, dTheta, Alpha, dAlpha = State
         dState = np.zeros(4)
 
         # State Derivative Calculation
         # Motor Torque Calculation
-        # Let's Get the Input into Zero For Now
-        Vm = 0
         Tau = self.Eta_g * self.Kg * self.Eta_m * self.kt \
                          * (Vm - self.Kg*self.km*dTheta) / self.Rm
 
@@ -94,28 +184,35 @@ class InvPendulum:
 
         return dState
 
-    def Simulate(self, x0=np.zeros(4), t=np.linspace(0, 10), solver='dopri5'):
-        """Simulates the system for given initial conditions and time points."""
+    def Simulate(self, x0=np.zeros(4), t=np.linspace(0, 10), solver='dopri5', controller='SlidingMode'):
+        """Simulates the system for given initial conditions and time points and Controller."""
 
-        if solver not in ['dopri5', 'vode', 'zvode', 'lsoda', 'dop853']:
+        AvailableSolvers = ['dopri5', 'vode', 'zvode', 'lsoda', 'dop853']
+        if solver not in AvailableSolvers:
             raise ValueError(
-                "Invalid solver. Available options are: 'dopri5', 'vode', 'zvode', 'lsoda', 'dop853'")
+                f"Invalid solver. Available options are:{AvailableSolvers}")
+
+        # Controller Properties
+        AvailableControllers = ['SlidingMode']
+        if controller not in AvailableControllers:
+            raise ValueError(
+                f"Invalid Controller. Available options are: {AvailableControllers}")
 
         # Solver Properties Selection
-        r = ode(self.ODEFunction).set_integrator(solver)
-        r.set_initial_value(x0, t[0])
+        Solver = ode(self.ForcedSystemODE).set_integrator(solver)
+        Solver.set_initial_value(x0, t[0])
 
         # Memoery Allocation and Initial Condition Set
         x = np.zeros((len(t), len(x0)))
         x[0, :] = x0
 
         for i, _t in tqdm(enumerate(t[1:]), total=len(t[1:]), desc="Simulating in Progress!"):
-            r.integrate(_t)
-            if r.successful():
-                x[i+1, :] = r.y
+            Solver.integrate(_t)
+            if Solver.successful():
+                x[i+1, :] = Solver.y
             else:
                 print(f"Integration failed at t={_t}")
-                print("Return code:", r.get_return_code())
+                print("Return code:", Solver.get_return_code())
                 break
 
         return x, t
