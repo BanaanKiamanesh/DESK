@@ -134,9 +134,102 @@ class InvPendulum:
         Vm = (U1 * Lambda2 + U2) / (1 + Lambda2)
         Vm = U2
         return Vm
+    
+    def SlidingModeNew(self, t, State, Traj=Trajectory):
+        # Desired X and Derivatives of it
+        Alphad, dAlphad, ddAlphad = Traj(t)
+        Thetad, dThetad, ddThetad = 0, 0, 0
+
+        # Disturbance
+        OmegaTheta = 0
+        OmegaAlpha = 0
+
+        # Unpack the in Coming State
+        Theta, dTheta, Alpha, dAlpha = State
+
+        # Error Dynamics
+        # Alpha
+        AlphaErr = Alphad - Alpha
+        dAlphaErr = dAlphad - dAlpha
+        # Theta
+        ThetaErr = Thetad - Theta
+        dThetaErr = dThetad - dTheta
+
+
+        # Dynamical Propeties Calculation
+
+        # Motor Torque Calculation
+        Tau = self.Eta_g * self.Kg * self.Eta_m * self.kt / self.Rm
+
+        # Generalized Coordinate
+        # q = [Theta, Alpha] , dq = [dTheta, dAlpha] , ddq = [ddTheta, ddAlpha]
+        q = np.zeros((2,1))
+        q[0, 0] = Theta
+        q[1, 0] = Alpha
+        
+        dq = np.zeros((2,1))
+        dq[0, 0] = dTheta
+        dq[1, 0] = dAlpha
+
+        # Generalized Coordinate Desireds
+        q_d = np.zeros((2,1))
+        q_d[0, 0] = Thetad
+        q_d[1, 0] = Alphad
+        
+        dq_d = np.zeros((2,1))
+        dq_d[0, 0] = dThetad
+        dq_d[1, 0] = dAlphad
+
+        ddq_d = np.zeros((2,1))
+        ddq_d[0, 0] = ddThetad
+        ddq_d[1, 0] = ddAlphad
+
+
+        # Generalized Coordinate Errors
+        e  = q_d  - q
+        de = dq_d - dq
+
+        # Sliding Mode Controller Coefs
+        Lambda = 10
+        Eta = 10
+
+        # Sliding Surface
+        S = de + Lambda * e
+
+        # M Matrix Filling
+        M = np.zeros((2, 2))
+
+        M[0, 0] = self.Mp * self.Lr**2 + 0.25 * self.Mp * self.Lp**2 - 0.25 * self.Mp * self.Lp**2 * np.cos(Alpha)**2 + self.Jr
+        M[0, 1] = -0.5 * self.Mp * self.Lp * self.Lr * np.cos(Alpha)
+        M[1, 0] = -0.5 * self.Mp * self.Lp * self.Lr * np.cos(Alpha)
+        M[1, 1] = self.Jp + 0.25 * self.Mp * self.Lp**2
+
+        # C Matrix Filling
+        C = np.zeros((2, 2))
+
+        C[0, 0] = (0.5 * self.Mp * self.Lp**2 * np.sin(Alpha) * np.cos(Alpha)) * Alphad + self.Br
+        C[0, 1] =  0.5 * self.Mp * self.Lp * self.Lr * np.sin(Alpha) * Alphad
+        C[1, 0] = (-0.25 * self.Mp * self.Lp**2 * np.sin(Alpha) * np.cos(Alpha)) * Thetad
+        C[1, 1] = self.Bp
+
+        # G Vector Filling
+        G = np.zeros((2, 1))
+
+        G[0, 0] = 0
+        G[1, 0] = -0.5 * self.Mp * self.Lp * self.g * np.sin(Alpha)
+
+        # D as the Deteminant of F
+        D = np.linalg.det(M)
+        print(D)
+
+        # Control Signal Calculation
+        U = M * (ddq_d + Lambda * e + Eta * np.sign(S)) + C * dq + G
+        return U[0, 0]
+
 
     def ForcedSystemODE(self, t, State):
-        self.U = self.SlidingMode(t, State)
+        # self.U = self.SlidingMode(t, State)
+        self.U = self.SlidingModeNew(t, State)
         # self.U = 0
         return self.SystemODE(t, State, self.U)
 
@@ -184,7 +277,7 @@ class InvPendulum:
 
         return dState
 
-    def Simulate(self, x0=np.zeros(4), t=np.linspace(0, 10), solver='dopri5', controller='SlidingMode'):
+    def Simulate(self, x0=np.zeros(4), t=np.linspace(0, 10), solver='dopri5', controller='SlidingModeNew'):
         """Simulates the system for given initial conditions and time points and Controller."""
 
         AvailableSolvers = ['dopri5', 'vode', 'zvode', 'lsoda', 'dop853']
@@ -193,7 +286,7 @@ class InvPendulum:
                 f"Invalid solver. Available options are:{AvailableSolvers}")
 
         # Controller Properties
-        AvailableControllers = ['SlidingMode']
+        AvailableControllers = ['SlidingMode', 'SlidingModeNew']
         if controller not in AvailableControllers:
             raise ValueError(
                 f"Invalid Controller. Available options are: {AvailableControllers}")
