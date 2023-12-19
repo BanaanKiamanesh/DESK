@@ -60,6 +60,9 @@ class InvPendulum:
         self.Jp = self.Mp * self.Lp**2 / 3
         self.Jr = self.Mr * self.Lr**2 / 3
 
+        # self.Jp = 1
+        # self.Jr = 1
+
     def Saturation(self, X):
         return X if np.abs(X) > 1 else np.sign(X)
 
@@ -147,19 +150,7 @@ class InvPendulum:
         # Unpack the in Coming State
         Theta, dTheta, Alpha, dAlpha = State
 
-        # Error Dynamics
-        # Alpha
-        AlphaErr = Alphad - Alpha
-        dAlphaErr = dAlphad - dAlpha
-        # Theta
-        ThetaErr = Thetad - Theta
-        dThetaErr = dThetad - dTheta
-
-
         # Dynamical Propeties Calculation
-
-        # Motor Torque Calculation
-        Tau = self.Eta_g * self.Kg * self.Eta_m * self.kt / self.Rm
 
         # Generalized Coordinate
         # q = [Theta, Alpha] , dq = [dTheta, dAlpha] , ddq = [ddTheta, ddAlpha]
@@ -191,7 +182,7 @@ class InvPendulum:
 
         # Sliding Mode Controller Coefs
         Lambda = 10
-        Eta = 10
+        Eta = 3
 
         # Sliding Surface
         S = de + Lambda * e
@@ -219,12 +210,16 @@ class InvPendulum:
         G[1, 0] = -0.5 * self.Mp * self.Lp * self.g * np.sin(Alpha)
 
         # D as the Deteminant of F
-        D = np.linalg.det(M)
-        print(D)
+        # D = np.linalg.det(M)
+        # print(D)
 
         # Control Signal Calculation
-        U = M * (ddq_d + Lambda * e + Eta * np.sign(S)) + C * dq + G
-        return U[0, 0]
+        U = M * (ddq_d + Lambda * e + Eta * np.tanh(S)) + C * dq + G
+
+        # Relationship Between Motor Torque and Voltage
+        Vm = self.Rm / (self.Eta_g * self.Kg * self.Eta_m * self.kt) * U[0, 0] + self.Kg * self.km * dTheta 
+        
+        return Vm
 
 
     def ForcedSystemODE(self, t, State):
