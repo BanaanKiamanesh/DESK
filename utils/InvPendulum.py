@@ -140,7 +140,7 @@ class InvPendulum:
     
     def SlidingModeNew(self, t, State, Traj=Trajectory):
         # Desired X and Derivatives of it
-        Alphad, dAlphad, ddAlphad = Traj(t)
+        Alphad, dAlphad, ddAlphad = np.pi, 0, 0
         Thetad, dThetad, ddThetad = 0, 0, 0
 
         # Disturbance
@@ -182,7 +182,7 @@ class InvPendulum:
 
         # Sliding Mode Controller Coefs
         Lambda = 10
-        Eta = 3
+        Eta = 5
 
         # Sliding Surface
         S = de + Lambda * e
