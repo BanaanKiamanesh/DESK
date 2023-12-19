@@ -60,6 +60,10 @@ class InvPendulum:
         self.Jp = self.Mp * self.Lp**2 / 3
         self.Jr = self.Mr * self.Lr**2 / 3
 
+        
+        # self.Jp = 1 / 12
+        # self.Jr = 1 / 12
+
         # self.Jp = 1
         # self.Jr = 1
 
@@ -140,7 +144,7 @@ class InvPendulum:
     
     def SlidingModeNew(self, t, State, Traj=Trajectory):
         # Desired X and Derivatives of it
-        Alphad, dAlphad, ddAlphad = np.pi, 0, 0
+        Alphad, dAlphad, ddAlphad = 0, 0, 0
         Thetad, dThetad, ddThetad = 0, 0, 0
 
         # Disturbance
@@ -155,25 +159,25 @@ class InvPendulum:
         # Generalized Coordinate
         # q = [Theta, Alpha] , dq = [dTheta, dAlpha] , ddq = [ddTheta, ddAlpha]
         q = np.zeros((2,1))
-        q[0, 0] = Theta
-        q[1, 0] = Alpha
+        q[0] = Theta
+        q[1] = Alpha
         
         dq = np.zeros((2,1))
-        dq[0, 0] = dTheta
-        dq[1, 0] = dAlpha
+        dq[0] = dTheta
+        dq[1] = dAlpha
 
         # Generalized Coordinate Desireds
         q_d = np.zeros((2,1))
-        q_d[0, 0] = Thetad
-        q_d[1, 0] = Alphad
+        q_d[0] = Thetad
+        q_d[1] = Alphad
         
         dq_d = np.zeros((2,1))
-        dq_d[0, 0] = dThetad
-        dq_d[1, 0] = dAlphad
+        dq_d[0] = dThetad
+        dq_d[1] = dAlphad
 
         ddq_d = np.zeros((2,1))
-        ddq_d[0, 0] = ddThetad
-        ddq_d[1, 0] = ddAlphad
+        ddq_d[0] = ddThetad
+        ddq_d[1] = ddAlphad
 
 
         # Generalized Coordinate Errors
@@ -181,8 +185,9 @@ class InvPendulum:
         de = dq_d - dq
 
         # Sliding Mode Controller Coefs
-        Lambda = 10
-        Eta = 5
+        Lambda = 1
+        Eta = 1
+        Ks = 0
 
         # Sliding Surface
         S = de + Lambda * e
@@ -198,26 +203,37 @@ class InvPendulum:
         # C Matrix Filling
         C = np.zeros((2, 2))
 
-        C[0, 0] = (0.5 * self.Mp * self.Lp**2 * np.sin(Alpha) * np.cos(Alpha)) * Alphad + self.Br
-        C[0, 1] =  0.5 * self.Mp * self.Lp * self.Lr * np.sin(Alpha) * Alphad
-        C[1, 0] = (-0.25 * self.Mp * self.Lp**2 * np.sin(Alpha) * np.cos(Alpha)) * Thetad
+        C[0, 0] = (0.5 * self.Mp * self.Lp**2 * np.sin(Alpha) * np.cos(Alpha)) * dAlpha + self.Br
+        C[0, 1] =  0.5 * self.Mp * self.Lp * self.Lr * np.sin(Alpha) * dAlpha
+        C[1, 0] = (-0.25 * self.Mp * self.Lp**2 * np.sin(Alpha) * np.cos(Alpha)) * dTheta
         C[1, 1] = self.Bp
+
 
         # G Vector Filling
         G = np.zeros((2, 1))
 
-        G[0, 0] = 0
-        G[1, 0] = -0.5 * self.Mp * self.Lp * self.g * np.sin(Alpha)
+        G[0] = 0
+        G[1] = -0.5 * self.Mp * self.Lp * self.g * np.sin(Alpha)
 
         # D as the Deteminant of F
-        # D = np.linalg.det(M)
+        D = np.linalg.det(M)
         # print(D)
 
         # Control Signal Calculation
-        U = M * (ddq_d + Lambda * e + Eta * np.tanh(S)) + C * dq + G
+        U = M @ (ddq_d + Lambda * de + Eta * np.tanh(S) + Ks * S) + C @ dq + G
+
+
+
+        # Test Feedback Liearization
+        # V = np.zeros((2,1))
+        # V = ddq_d + 10 * de + 25 * e
+
+        # U = M @ V + C @ dq + G
+
+        # print(U)
 
         # Relationship Between Motor Torque and Voltage
-        Vm = self.Rm / (self.Eta_g * self.Kg * self.Eta_m * self.kt) * U[0, 0] + self.Kg * self.km * dTheta 
+        Vm = self.Rm  * U / (self.Eta_g * self.Kg * self.Eta_m * self.kt) + self.Kg * self.km * dTheta 
         
         return Vm
 
@@ -255,12 +271,12 @@ class InvPendulum:
 
         # B Matrix Filling
         B = np.zeros(2)
-        B[0] = Tau - self.Br*dTheta - (0.5 * self.Mp * self.Lp**2 * np.sin(Alpha)
+        B[0] = Tau[0] - self.Br*dTheta - (0.5 * self.Mp * self.Lp**2 * np.sin(Alpha)
                                        * np.cos(Alpha)) * dTheta * dAlpha \
                                     - (0.5 * self.Mp * self.Lp *
                                        self.Lr * np.sin(Alpha)) * dAlpha**2
 
-        B[1] = -self.Bp*dAlpha + (0.25*self.Mp * self.Lp**2
+        B[1] = Tau[1] -self.Bp*dAlpha + (0.25*self.Mp * self.Lp**2
                                   * np.cos(Alpha) * np.sin(Alpha)) * dTheta**2 \
             + (0.5*self.Mp * self.Lp * self.g * np.sin(Alpha))
 
